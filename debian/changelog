@@ -1,3 +1,135 @@
+lwip (2.2.1+dfsg1-1deepin1) unstable; urgency=medium
+
+  * revert t64
+
+ -- lhdjply <lhdjply@126.com>  Tue, 1 Apr 2025 17:24:32 +0800
+
+lwip (2.2.1+dfsg1-1) unstable; urgency=medium
+
+  * New upstream release
+  * patches/max_sockets: Updated to apply correctly
+  * patches/posixlib: Updated to apply correctly
+
+ -- Joan Lledó <jlledom@member.fsf.org>  Sat, 01 Mar 2025 19:47:48 +0100
+
+lwip (2.2.0+dfsg1-9) unstable; urgency=medium
+
+  * Fix lintian warnings
+    * Add metadata to patches
+    * Fix warnings about encoding
+    * Update to standards version 4.7.0
+
+ -- Joan Lledó <jlledom@member.fsf.org>  Sat, 15 Feb 2025 10:47:06 +0100
+
+lwip (2.2.0+dfsg1-8) unstable; urgency=medium
+
+  * patches/doxygen: Fix build with doxygen 1.12.  Closes: #1080183
+
+ -- Samuel Thibault <sthibault@debian.org>  Sun, 01 Sep 2024 18:27:28 +0200
+
+lwip (2.2.0+dfsg1-7) unstable; urgency=medium
+
+  [ Joan Lledó ]
+  * Refactor max_sockets patch
+    * Use a dynamic array instead of a linked list
+
+  [ Samuel Thibault ]
+  * control: Build-depend on libvdeplug-dev on all Linux ports.
+
+ -- Joan Lledó <jlledom@member.fsf.org>  Sat, 11 May 2024 10:56:03 +0200
+
+lwip (2.2.0+dfsg1-6.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Rename libraries for 64-bit time_t transition.  Closes: #1062676
+
+ -- Graham Inggs <ginggs@debian.org>  Thu, 29 Feb 2024 10:35:21 +0000
+
+lwip (2.2.0+dfsg1-6) unstable; urgency=medium
+
+  * Minor fixes for the posixlib patch
+    * Remove support for Debian kFreeBSD
+    * Remove LWIP_POLL macro
+    * Enable byte order functions from cc.h
+
+ -- Joan Lledó <jlledom@member.fsf.org>  Sat, 20 Jan 2024 10:52:55 +0100
+
+lwip (2.2.0+dfsg1-5) unstable; urgency=medium
+
+  * Fix poll interruptibility logic
+  * sem_wait returns SYS_ARCH_INT when timeout == UINT32_MAX.
+    When timeout == 0, it ignores interruptions and only returns when
+    it acquires the token.
+  * lwip_select and lwip_poll check for SYS_ARCH_INTR and fail properly.
+  * debian/patches/posixlib: Implement changes above.
+
+ -- Joan Lledó <jlledom@member.fsf.org>  Wed, 03 Jan 2024 11:32:18 +0100
+
+lwip (2.2.0+dfsg1-4) unstable; urgency=medium
+
+  * Simplify patch posixlib
+  * debian/patches/posixlib: Remove some useless code
+
+ -- Joan Lledó <jlledom@member.fsf.org>  Tue, 26 Dec 2023 14:37:13 +0100
+
+lwip (2.2.0+dfsg1-3) unstable; urgency=medium
+
+  * Add VDE dependency for Linux
+  * debian/control: Add libvdeplug-dev to Build-Depends
+
+ -- Joan Lledó <jlledom@member.fsf.org>  Sat, 09 Dec 2023 15:02:00 +0100
+
+lwip (2.2.0+dfsg1-2) unstable; urgency=medium
+
+  * patches/empty_block_last: Restored, still needed in 2.2.0
+
+ -- Joan Lledó <jlledom@member.fsf.org>  Sat, 18 Nov 2023 12:19:21 +0100
+
+lwip (2.2.0+dfsg1-1) unstable; urgency=medium
+
+  * New upstream release
+  * patches/CVE-2020-8597: Removed, already upstream
+  * patches/cmake: Removed, most of the code is already upstream
+  * patches/port: Removed, most of the code is altready upstream
+  * patches/posixlib: New patch containing code from old cmake and port
+    patches which is not upstream yet
+  * patches/empty_block_last: Removed, I'm not sure it's still required in 2.2.0
+    I'll add it if the build fails
+  * patches/max_sockets: Updated to apply correctly in the new version
+  * patches/nodoc: Removed, it's part of patches/posixlib now.
+  * patches/patch9350: Removed, already upstream
+  * patches/patch9807: Removed, already upstream
+
+ -- Joan Lledó <jlledom@member.fsf.org>  Sun, 12 Nov 2023 19:15:07 +0100
+
+lwip (2.1.3+dfsg1-4) unstable; urgency=medium
+
+  * Team upload.
+  * patches/empty_block_last: Fix out-of-bound access when looking for empty
+    blocks (Closes: Bug#1055173)
+
+ -- Samuel Thibault <sthibault@debian.org>  Sun, 05 Nov 2023 19:08:47 +0100
+
+lwip (2.1.3+dfsg1-3) unstable; urgency=medium
+
+  * clean: Clean generated files (Closes: Bug#1047442)
+  * patches/nodoc: Support building without doxygen.
+  * control: Add nodoc profile that avoids doxygen dependency.
+
+ -- Samuel Thibault <sthibault@debian.org>  Sun, 01 Oct 2023 19:59:52 +0200
+
+lwip (2.1.3+dfsg1-2) unstable; urgency=medium
+
+  [ Samuel Thibault ]
+  * control: Bump Standards-Version to 4.6.0 (no change)
+  * patches/max_sockets: Restore patch, it was not actually upstreamed.
+
+  [ Joan Lledó ]
+  * Refresh patches
+  * Update standards version to 4.6.1
+
+ -- Joan Lledó <jlledom@member.fsf.org>  Mon, 11 Jul 2022 10:10:37 +0200
+
 lwip (2.1.3+dfsg1-1) unstable; urgency=medium
 
   * Team upload.

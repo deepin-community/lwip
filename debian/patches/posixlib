@@ -1,0 +1,355 @@
+Description: Many fixes on the POSIX library
+Forwarded: https://savannah.nongnu.org/patch/?10424
+Author: Joan Lled√≥ <jlledom@member.fsf.org>
+Last-Update: 2024-01-13
+
+--- a/contrib/ports/unix/posixlib/CMakeLists.txt
++++ b/contrib/ports/unix/posixlib/CMakeLists.txt
+@@ -1,8 +1,8 @@
+ cmake_minimum_required(VERSION 3.8)
+ project(liblwip
+     VERSION 2.2.0
+-    DESCRIPTION "lwip library for linux"
+-    HOMEPAGE_URL "http://wiki.virtualsquare.org"
++    DESCRIPTION "lwip library for POSIX systems"
++    HOMEPAGE_URL "https://savannah.nongnu.org/projects/lwip/"
+     LANGUAGES C)
+ 
+ include(GNUInstallDirs)
+@@ -10,7 +10,7 @@
+ 
+ set (BUILD_SHARED_LIBS ON)
+ 
+-if (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
++if (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_SYSTEM_NAME STREQUAL "GNU")
+     message(FATAL_ERROR "Lwip shared library is only working on Linux or the Hurd")
+ endif()
+ 
+@@ -56,6 +56,14 @@
+ find_library(LIBPTHREAD pthread)
+ target_link_libraries(lwip ${LIBPTHREAD})
+ 
++include(${LWIP_DIR}/src/Filelists.cmake)
++if (TARGET lwipdocs)
++  add_dependencies(lwip lwipdocs)
++endif()
++
++# Generate pkg-config file
++CONFIGURE_FILE("${LWIP_CONTRIB_DIR}/ports/unix/posixlib/lwip.pc.in" "${LWIP_CONTRIB_DIR}/ports/unix/posixlib/lwip.pc" @ONLY)
++
+ install(TARGETS lwip 
+ 		LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+ 
+@@ -89,6 +97,9 @@
+     FILES_MATCHING PATTERN "*.h"
+ )
+ 
++install (FILES ${LWIP_CONTRIB_DIR}/ports/unix/posixlib/lwip.pc
++    DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
++
+ add_custom_target(uninstall
+   "${CMAKE_COMMAND}" -P "${PROJECT_SOURCE_DIR}/Uninstall.cmake")
+ 
+--- /dev/null
++++ b/contrib/ports/unix/posixlib/lwip.pc.in
+@@ -0,0 +1,10 @@
++prefix=@CMAKE_INSTALL_PREFIX@
++exec_prefix=${prefix}
++libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
++includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@/lwip
++
++Name: liblwip
++Description: LwIP shared library
++Version: @LWIP_VERSION_MAJOR@.@LWIP_VERSION_MINOR@.@LWIP_VERSION_REVISION@
++Libs: -L${libdir} -llwip
++Cflags: -I${includedir}
+--- a/contrib/ports/unix/port/sys_arch.c
++++ b/contrib/ports/unix/port/sys_arch.c
+@@ -73,9 +73,6 @@
+ static pthread_key_t sys_thread_sem_key;
+ #endif
+ 
+-/* Return code for an interrupted timed wait */
+-#define SYS_ARCH_INTR 0xfffffffeUL
+-
+ u32_t
+ lwip_port_rand(void)
+ {
+@@ -502,7 +499,7 @@
+   #define pthread_cond_timedwait pthread_hurd_cond_timedwait_np
+ #endif
+ 
+-  if (timeout == 0) {
++  if (timeout == 0 || timeout == UINT32_MAX) {
+     ret = pthread_cond_wait(cond, mutex);
+     return
+ #ifdef LWIP_UNIX_HURD
+@@ -532,7 +529,7 @@
+   if (ret == ETIMEDOUT) {
+     return SYS_ARCH_TIMEOUT;
+ #ifdef LWIP_UNIX_HURD
+-    /* On the Hurd, ret == 1 means the RPC has been cancelled.
++    /* On the Hurd, ret == EINTR means the RPC has been cancelled.
+      * The thread is awakened (not terminated) and execution must continue */
+   } else if (ret == EINTR) {
+     return SYS_ARCH_INTR;
+@@ -550,6 +547,8 @@
+   return (u32_t)(ts.tv_sec * 1000L + ts.tv_nsec / 1000000L);
+ }
+ 
++/* timeout == 0: wait forever
++   timeout == UINT32_MAX: wait forever, and return SYS_ARCH_INTR when signaled*/
+ u32_t
+ sys_arch_sem_wait(struct sys_sem **s, u32_t timeout)
+ {
+@@ -563,21 +562,14 @@
+     if (timeout > 0) {
+       time_needed = cond_wait(&(sem->cond), &(sem->mutex), timeout);
+ 
+-      if (time_needed == SYS_ARCH_TIMEOUT) {
++      if (time_needed == SYS_ARCH_TIMEOUT || time_needed == SYS_ARCH_INTR) {
+         pthread_mutex_unlock(&(sem->mutex));
+-        return SYS_ARCH_TIMEOUT;
+-#ifdef LWIP_UNIX_HURD
+-      } else if(time_needed == SYS_ARCH_INTR) {
+-        pthread_mutex_unlock(&(sem->mutex));
+-        return 0;
+-#endif
++        return time_needed;
+       }
+-      /*      pthread_mutex_unlock(&(sem->mutex));
+-              return time_needed; */
+     } else if(cond_wait(&(sem->cond), &(sem->mutex), 0)) {
+       /* Some error happened or the thread has been awakened but not by lwip */
+       pthread_mutex_unlock(&(sem->mutex));
+-      return 0;
++      continue;
+     }
+   }
+   sem->c--;
+--- a/contrib/ports/unix/posixlib/include/posix/inet.h
++++ b/contrib/ports/unix/posixlib/include/posix/inet.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2023 Joan LledÛ <jlledom@member.fsf.org>
++ * Copyright (C) 2023 Joan Lled√≥ <jlledom@member.fsf.org>
+  *
+  * Redistribution and use in source and binary forms, with or without modification,
+  * are permitted provided that the following conditions are met:
+@@ -24,8 +24,8 @@
+  * OF SUCH DAMAGE.
+  */
+ 
+-#ifndef HURD_LWIP_POSIX_INET_H
+-#define HURD_LWIP_POSIX_INET_H
++#ifndef POSIX_LWIP_POSIX_INET_H
++#define POSIX_LWIP_POSIX_INET_H
+ 
+ #include <arpa/inet.h>
+ #include <netinet/in.h>
+@@ -73,4 +73,4 @@
+ }
+ #endif
+ 
+-#endif /* HURD_LWIP_POSIX_INET_H */
++#endif /* POSIX_LWIP_POSIX_INET_H */
+--- a/contrib/ports/unix/posixlib/include/posix/sockets.h
++++ b/contrib/ports/unix/posixlib/include/posix/sockets.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2023 Joan LledÛ <jlledom@member.fsf.org>
++ * Copyright (C) 2023 Joan Lled√≥ <jlledom@member.fsf.org>
+  *
+  * Redistribution and use in source and binary forms, with or without modification,
+  * are permitted provided that the following conditions are met:
+@@ -24,40 +24,30 @@
+  * OF SUCH DAMAGE.
+  */
+ 
+-#ifndef HURD_LWIP_POSIX_SOCKET_H
+-#define HURD_LWIP_POSIX_SOCKET_H
++#ifndef POSIX_LWIP_POSIX_SOCKET_H
++#define POSIX_LWIP_POSIX_SOCKET_H
+ 
+ #include <sys/socket.h>
+ #include <poll.h>
+ #include <errno.h>
+ #include LWIP_SOCKET_EXTERNAL_HEADER_INET_H
++
++#ifdef LWIP_UNIX_HURD
++typedef int msg_iovlen_t;
++#else
+ typedef size_t msg_iovlen_t;
++#endif /* LWIP_UNIX_HURD */
+ 
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+ 
+ #ifdef _HAVE_SA_LEN
+-#define HAVE_SA_LEN	_HAVE_SA_LEN
++#define LWIP_SOCKET_HAVE_SA_LEN     _HAVE_SA_LEN
+ #else
+-#define HAVE_SA_LEN	0
++#define LWIP_SOCKET_HAVE_SA_LEN     0
+ #endif /* _HAVE_SA_LEN */
+ 
+-/* Address length safe read and write */
+-#if HAVE_SA_LEN
+-#define IP4ADDR_SOCKADDR_SET_LEN(sin) \
+-      (sin)->sin_len = sizeof(struct sockaddr_in)
+-#define IP6ADDR_SOCKADDR_SET_LEN(sin6) \
+-      (sin6)->sin6_len = sizeof(struct sockaddr_in6)
+-#define IPADDR_SOCKADDR_GET_LEN(addr) \
+-      (addr)->sa.sa_len
+-#else
+-#define IP4ADDR_SOCKADDR_SET_LEN(addr)
+-#define IP6ADDR_SOCKADDR_SET_LEN(addr)
+-#define IPADDR_SOCKADDR_GET_LEN(addr) \
+-      ((addr)->sa.sa_family == AF_INET ? sizeof(struct sockaddr_in) \
+-        : ((addr)->sa.sa_family == AF_INET6 ? sizeof(struct sockaddr_in6) : 0))
+-#endif /* HAVE_SA_LEN */
+ 
+ #define SIN_ZERO_LEN	sizeof (struct sockaddr) - \
+                            __SOCKADDR_COMMON_SIZE - \
+@@ -147,4 +137,4 @@
+ }
+ #endif
+ 
+-#endif /* HURD_LWIP_POSIX_SOCKET_H */
++#endif /* POSIX_LWIP_POSIX_SOCKET_H */
+--- a/contrib/ports/unix/posixlib/lwipopts.h
++++ b/contrib/ports/unix/posixlib/lwipopts.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2023 Joan LledÛ <jlledom@member.fsf.org>
++ * Copyright (C) 2023 Joan Lled√≥ <jlledom@member.fsf.org>
+  *
+  * Redistribution and use in source and binary forms, with or without modification,
+  * are permitted provided that the following conditions are met:
+@@ -24,8 +24,8 @@
+  * OF SUCH DAMAGE.
+  */
+ 
+-#ifndef UNIX_LWIP_LWIPOPTS_H
+-#define UNIX_LWIP_LWIPOPTS_H
++#ifndef POSIX_LWIP_LWIPOPTS_H
++#define POSIX_LWIP_LWIPOPTS_H
+ 
+ /* An OS is present */
+ #define NO_SYS    0
+@@ -33,13 +33,11 @@
+ /* Sockets API config */
+ #define LWIP_COMPAT_SOCKETS       0
+ #define LWIP_SOCKET_OFFSET        1
+-#define LWIP_POLL                 1
+ 
+ /* User posix socket headers */
+ #define LWIP_SOCKET_EXTERNAL_HEADERS            1
+ #define LWIP_SOCKET_EXTERNAL_HEADER_SOCKETS_H   "posix/sockets.h"
+ #define LWIP_SOCKET_EXTERNAL_HEADER_INET_H      "posix/inet.h"
+-#define LWIP_DONT_PROVIDE_BYTEORDER_FUNCTIONS   1
+ 
+ /* Use Glibc malloc()/free() */
+ #define MEM_LIBC_MALLOC   1
+@@ -177,4 +175,4 @@
+ #define IP6_DEBUG         LWIP_DBG_OFF
+ #endif
+ 
+-#endif /* UNIX_LWIP_LWIPOPTS_H */
++#endif /* POSIX_LWIP_LWIPOPTS_H */
+--- a/src/include/lwip/sys.h
++++ b/src/include/lwip/sys.h
+@@ -86,6 +86,9 @@
+ /** Return code for timeouts from sys_arch_mbox_fetch and sys_arch_sem_wait */
+ #define SYS_ARCH_TIMEOUT 0xffffffffUL
+ 
++/** Return code for an interruptions from sys_arch_mbox_fetch and sys_arch_sem_wait */
++#define SYS_ARCH_INTR 0xfffffffeUL
++
+ /** sys_mbox_tryfetch() returns SYS_MBOX_EMPTY if appropriate.
+  * For now we use the same magic value, but we allow this to change in future.
+  */
+--- a/src/api/sockets.c
++++ b/src/api/sockets.c
+@@ -2118,8 +2118,8 @@
+         } else if (!nready) {
+           /* Still none ready, just wait to be woken */
+           if (timeout == NULL) {
+-            /* Wait forever */
+-            msectimeout = 0;
++            /* Wait forever, but accept interruptions */
++            msectimeout = UINT32_MAX;
+           } else {
+             long msecs_long = ((timeout->tv_sec * 1000) + ((timeout->tv_usec + 500) / 1000));
+             if (msecs_long <= 0) {
+@@ -2174,6 +2174,14 @@
+ #endif /* LWIP_NETCONN_SEM_PER_THREAD */
+       API_SELECT_CB_VAR_FREE(select_cb);
+ 
++      if (waitres == SYS_ARCH_INTR) {
++        /* Signaled */
++        LWIP_DEBUGF(SOCKETS_DEBUG, ("lwip_select: interrupted\n"));
++        lwip_select_dec_sockets_used(maxfdp1, &used_sockets);
++        set_errno(EINTR);
++        return -1;
++      }
++
+       if (nready < 0) {
+         /* This happens when a socket got closed while waiting */
+         lwip_select_dec_sockets_used(maxfdp1, &used_sockets);
+@@ -2428,8 +2436,8 @@
+     if (!nready) {
+       /* Still none ready, just wait to be woken */
+       if (timeout < 0) {
+-        /* Wait forever */
+-        msectimeout = 0;
++        /* Wait forever, but accept interruptions */
++        msectimeout = UINT32_MAX;
+       } else {
+         /* timeout == 0 would have been handled earlier. */
+         LWIP_ASSERT("timeout > 0", timeout > 0);
+@@ -2457,6 +2465,14 @@
+ #endif /* LWIP_NETCONN_SEM_PER_THREAD */
+     API_SELECT_CB_VAR_FREE(select_cb);
+ 
++    if (waitres == SYS_ARCH_INTR) {
++      /* Signaled */
++      LWIP_DEBUGF(SOCKETS_DEBUG, ("lwip_poll: interrupted\n"));
++      lwip_poll_dec_sockets_used(fds, nfds);
++      set_errno(EINTR);
++      return -1;
++    }
++
+     if (nready < 0) {
+       /* This happens when a socket got closed while waiting */
+       lwip_poll_dec_sockets_used(fds, nfds);
+--- a/contrib/ports/unix/port/include/arch/cc.h
++++ b/contrib/ports/unix/port/include/arch/cc.h
+@@ -43,8 +43,6 @@
+ #define LWIP_UNIX_OPENBSD
+ #elif defined __FreeBSD__
+ #define LWIP_UNIX_FREEBSD
+-#elif defined __FreeBSD_kernel__ && __GLIBC__
+-#define LWIP_UNIX_KFREEBSD
+ #elif defined __CYGWIN__
+ #define LWIP_UNIX_CYGWIN
+ #elif defined __GNU__
+@@ -60,7 +58,7 @@
+ 
+ #define LWIP_ERRNO_INCLUDE <errno.h>
+ 
+-#if defined(LWIP_UNIX_LINUX) || defined(LWIP_UNIX_HURD) || defined(LWIP_UNIX_KFREEBSD)
++#if defined(LWIP_UNIX_LINUX) || defined(LWIP_UNIX_HURD)
+ #define LWIP_ERRNO_STDINCLUDE	1
+ #endif
+ 
+@@ -77,7 +75,7 @@
+ typedef __kernel_fd_set fd_set;
+ #endif
+ 
+-#if defined(LWIP_UNIX_MACH)
++#if defined(LWIP_UNIX_MACH) || defined(LWIP_UNIX_LINUX) || defined(LWIP_UNIX_HURD)
+ /* sys/types.h and signal.h bring in Darwin byte order macros. pull the
+    header here and disable LwIP's version so that apps still can get
+    the macros via LwIP headers and use system headers */
