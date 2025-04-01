@@ -1,0 +1,16 @@
+Description: Fix out-of-bound access when only last block is empty
+Forwarded: https://savannah.nongnu.org/patch/index.php?10410
+Author: Samuel Thibault <sthibault@debian.org>
+Last-Update: 2023-11-18
+
+--- a/src/core/ipv6/ip6_addr.c
++++ b/src/core/ipv6/ip6_addr.c
+@@ -278,7 +278,7 @@
+         }
+         break;
+       }
+-      if (empty_block_flag == 0) {
++      if (empty_block_flag == 0 && current_block_index < 7) {
+         /* generate empty block "::", but only if more than one contiguous zero block,
+          * according to current formatting suggestions RFC 5952. */
+         next_block_value = lwip_htonl(addr->addr[(current_block_index + 1) >> 1]);

@@ -1,0 +1,52 @@
+Forwarded: https://savannah.nongnu.org/bugs/?66159
+
+commit 56abeefafb9a8f3c8e637e1da382ed56f6b7b2cb
+Author: Samuel Thibault <samuel.thibault@ens-lyon.org>
+Date:   Sun Sep 1 18:26:37 2024 +0200
+
+    doxygen: Fix group names
+    
+    - group netifapi_arp was not defined
+    - groups tcp and ip5addr don't exist
+
+diff --git a/src/api/netifapi.c b/src/api/netifapi.c
+index 25957cd5..b54c4dc8 100644
+--- a/src/api/netifapi.c
++++ b/src/api/netifapi.c
+@@ -9,6 +9,10 @@
+  * @defgroup netifapi_netif NETIF related
+  * @ingroup netifapi
+  * To be called from non-TCPIP threads
++ *
++ * @defgroup netifapi_arp ARP related
++ * @ingroup netifapi
++ * To be called from non-TCPIP threads
+  */
+ 
+ /*
+diff --git a/src/core/tcp.c b/src/core/tcp.c
+index ea95ffee..57af0a7a 100644
+--- a/src/core/tcp.c
++++ b/src/core/tcp.c
+@@ -1638,7 +1638,7 @@ tcp_seg_free(struct tcp_seg *seg)
+ }
+ 
+ /**
+- * @ingroup tcp
++ * @ingroup tcp_raw
+  * Sets the priority of a connection.
+  *
+  * @param pcb the tcp_pcb to manipulate
+diff --git a/src/include/lwip/ip_addr.h b/src/include/lwip/ip_addr.h
+index 06454a4a..93d9cd5e 100644
+--- a/src/include/lwip/ip_addr.h
++++ b/src/include/lwip/ip_addr.h
+@@ -164,7 +164,7 @@ extern const ip_addr_t ip_addr_any_type;
+ /** @ingroup ipaddr */
+ #define ip_addr_set_zero(ipaddr)     do{ \
+   ip6_addr_set_zero(ip_2_ip6(ipaddr)); IP_SET_TYPE(ipaddr, 0); }while(0)
+-/** @ingroup ip5addr */
++/** @ingroup ip4addr */
+ #define ip_addr_set_zero_ip4(ipaddr)     do{ \
+   ip6_addr_set_zero(ip_2_ip6(ipaddr)); IP_SET_TYPE(ipaddr, IPADDR_TYPE_V4); }while(0)
+ /** @ingroup ip6addr */

@@ -3,4 +3,4 @@
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all reproducible=+fixfilepath
 
 %:
-	dh $@
+	dh $@ --sourcedirectory=contrib/ports/unix/posixlib

@@ -1,0 +1,185 @@
+Description: Remove limit on number of sockets
+Forwarded: https://savannah.nongnu.org/patch/?9431
+Author: Joan Lledó <jlledom@member.fsf.org>
+Last-Update: 2024-03-19
+
+--- a/src/include/lwip/opt.h
++++ b/src/include/lwip/opt.h
+@@ -2070,6 +2070,15 @@
+ #endif
+ 
+ /**
++ * LWIP_SOCKET_OPEN_COUNT==1: Number of sockets is not limited to MEMP_NUM_NETCONN.
++ * When enabled, sockets are allocated in the heap and the amount of sockets is
++ * only limited by the heap size. Handle with care regarding execution speed.
++ */
++#if !defined LWIP_SOCKET_OPEN_COUNT || defined __DOXYGEN__
++#define LWIP_SOCKET_OPEN_COUNT          0
++#endif
++
++/**
+  * LWIP_TCP_KEEPALIVE==1: Enable TCP_KEEPIDLE, TCP_KEEPINTVL and TCP_KEEPCNT
+  * options processing. Note that TCP_KEEPIDLE and TCP_KEEPINTVL have to be set
+  * in seconds. (does not require sockets.c, and will affect tcp.c)
+--- a/contrib/ports/unix/posixlib/lwipopts.h
++++ b/contrib/ports/unix/posixlib/lwipopts.h
+@@ -33,6 +33,7 @@
+ /* Sockets API config */
+ #define LWIP_COMPAT_SOCKETS       0
+ #define LWIP_SOCKET_OFFSET        1
++#define LWIP_SOCKET_OPEN_COUNT    1
+ 
+ /* User posix socket headers */
+ #define LWIP_SOCKET_EXTERNAL_HEADERS            1
+--- a/src/api/sockets.c
++++ b/src/api/sockets.c
+@@ -301,7 +301,12 @@
+ #endif /* LWIP_IPV6_MLD */
+ 
+ /** The global array of available sockets */
++static int sockets_slots_count = NUM_SOCKETS;
++#if LWIP_SOCKET_OPEN_COUNT
++static struct lwip_sock *sockets = NULL;
++#else
+ static struct lwip_sock sockets[NUM_SOCKETS];
++#endif /* LWIP_SOCKET_OPEN_COUNT */
+ 
+ #if LWIP_SOCKET_SELECT || LWIP_SOCKET_POLL
+ #if LWIP_TCPIP_CORE_LOCKING
+@@ -450,7 +455,7 @@
+ tryget_socket_unconn_nouse(int fd)
+ {
+   int s = fd - LWIP_SOCKET_OFFSET;
+-  if ((s < 0) || (s >= NUM_SOCKETS)) {
++  if ((s < 0) || (s >= sockets_slots_count)) {
+     LWIP_DEBUGF(SOCKETS_DEBUG, ("tryget_socket_unconn(%d): invalid\n", fd));
+     return NULL;
+   }
+@@ -519,7 +524,7 @@
+ {
+   struct lwip_sock *sock = tryget_socket(fd);
+   if (!sock) {
+-    if ((fd < LWIP_SOCKET_OFFSET) || (fd >= (LWIP_SOCKET_OFFSET + NUM_SOCKETS))) {
++    if ((fd < LWIP_SOCKET_OFFSET) || (fd >= (LWIP_SOCKET_OFFSET + sockets_slots_count))) {
+       LWIP_DEBUGF(SOCKETS_DEBUG, ("get_socket(%d): invalid\n", fd));
+     }
+     set_errno(EBADF);
+@@ -528,6 +533,57 @@
+   return sock;
+ }
+ 
++#if LWIP_SOCKET_OPEN_COUNT
++/**
++ * Allocate MEMP_NUM_NETCONN slots for new sockets.
++ *
++ * @return 0 on success; -1 on error
++ */
++static int
++alloc_socket_slots_locked(void) {
++  int sockets_new_count;
++  struct lwip_sock *old_sockets, *new_sockets;
++
++  sockets_new_count = sockets_slots_count + MEMP_NUM_NETCONN;
++  new_sockets = (struct lwip_sock*)mem_calloc(sockets_new_count, sizeof(struct lwip_sock));
++  if(!new_sockets) {
++    /* No free memory */
++    return -1;
++  }
++  old_sockets = sockets;
++  MEMCPY(new_sockets, old_sockets, sizeof(struct lwip_sock) * sockets_slots_count);
++  sockets = new_sockets;
++  sockets_slots_count = sockets_new_count;
++  mem_free(old_sockets);
++
++  return 0;
++}
++#endif /* LWIP_SOCKET_OPEN_COUNT */
++
++/**
++ * Initialize a new allocated socket.
++ *
++ * @param idx ths socket index in the internal array
++ * @param newconn the netconn for which to initialize a socket
++ * @param accepted 1 if socket has been created by accept(),
++ *                 0 if socket has been created by socket()
++ * @return the index of the new socket; -1 on error
++ */
++static int
++init_socket(int idx, struct netconn *newconn, int accepted)
++{
++  sockets[idx].lastdata.pbuf = NULL;
++#if LWIP_SOCKET_SELECT || LWIP_SOCKET_POLL
++  LWIP_ASSERT("sockets[i].select_waiting == 0", sockets[idx].select_waiting == 0);
++  sockets[idx].rcvevent   = 0;
++  /* TCP sendbuf is empty, but the socket is not yet writable until connected
++    * (unless it has been created by accept()). */
++  sockets[idx].sendevent  = (NETCONNTYPE_GROUP(newconn->type) == NETCONN_TCP ? (accepted != 0) : 1);
++  sockets[idx].errevent   = 0;
++#endif /* LWIP_SOCKET_SELECT || LWIP_SOCKET_POLL */
++  return idx + LWIP_SOCKET_OFFSET;
++}
++
+ /**
+  * Allocate a new socket for a given netconn.
+  *
+@@ -541,10 +597,15 @@
+ {
+   int i;
+   SYS_ARCH_DECL_PROTECT(lev);
+-  LWIP_UNUSED_ARG(accepted);
++
++#if LWIP_SOCKET_OPEN_COUNT
++  if (sockets == NULL) {
++    sockets = (struct lwip_sock*)mem_calloc(NUM_SOCKETS, sizeof(struct lwip_sock));
++  }
++#endif /* LWIP_SOCKET_OPEN_COUNT */
+ 
+   /* allocate a new socket identifier */
+-  for (i = 0; i < NUM_SOCKETS; ++i) {
++  for (i = 0; i < sockets_slots_count; ++i) {
+     /* Protect socket array */
+     SYS_ARCH_PROTECT(lev);
+     if (!sockets[i].conn) {
+@@ -560,20 +621,23 @@
+       /* The socket is not yet known to anyone, so no need to protect
+          after having marked it as used. */
+       SYS_ARCH_UNPROTECT(lev);
+-      sockets[i].lastdata.pbuf = NULL;
+-#if LWIP_SOCKET_SELECT || LWIP_SOCKET_POLL
+-      LWIP_ASSERT("sockets[i].select_waiting == 0", sockets[i].select_waiting == 0);
+-      sockets[i].rcvevent   = 0;
+-      /* TCP sendbuf is empty, but the socket is not yet writable until connected
+-       * (unless it has been created by accept()). */
+-      sockets[i].sendevent  = (NETCONNTYPE_GROUP(newconn->type) == NETCONN_TCP ? (accepted != 0) : 1);
+-      sockets[i].errevent   = 0;
+-#endif /* LWIP_SOCKET_SELECT || LWIP_SOCKET_POLL */
+-      return i + LWIP_SOCKET_OFFSET;
++      return init_socket(i, newconn, accepted);
+     }
+     SYS_ARCH_UNPROTECT(lev);
+   }
++#if LWIP_SOCKET_OPEN_COUNT
++  SYS_ARCH_PROTECT(lev);
++  if (alloc_socket_slots_locked() < 0) {
++    SYS_ARCH_UNPROTECT(lev);
++    return -1;
++  }
++  sockets[i].conn = newconn;
++  SYS_ARCH_UNPROTECT(lev);
++
++  return init_socket(i, newconn, accepted);
++#else /* LWIP_SOCKET_OPEN_COUNT */
+   return -1;
++#endif /* LWIP_SOCKET_OPEN_COUNT */
+ }
+ 
+ /** Free a socket (under lock)
+@@ -696,7 +760,7 @@
+     done_socket(sock);
+     return -1;
+   }
+-  LWIP_ASSERT("invalid socket index", (newsock >= LWIP_SOCKET_OFFSET) && (newsock < NUM_SOCKETS + LWIP_SOCKET_OFFSET));
++  LWIP_ASSERT("invalid socket index", (newsock >= LWIP_SOCKET_OFFSET) && (newsock < sockets_slots_count + LWIP_SOCKET_OFFSET));
+   nsock = &sockets[newsock - LWIP_SOCKET_OFFSET];
+ 
+   /* Note that POSIX only requires us to check addr is non-NULL. addrlen must
